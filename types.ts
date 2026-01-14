@@ -8,8 +8,8 @@ export enum AppStatus {
 export interface JobMode {
   id: string;
   name: string;
-  instruction: string;
-  fileContent?: string;
+  guidelines: string; // User-provided guidelines in text box
+  fileContent?: string; // Extracted text from uploaded file for RAG
   fileName?: string;
 }
 
@@ -25,13 +25,11 @@ export interface Insight {
   timestamp: number;
   question: string;
   answer: string;
-  confidence?: number;
+  feedback?: 'positive' | 'negative';
+  policyApplied?: string;
 }
 
-export interface AppState {
-  isStealth: boolean;
-  status: AppStatus;
-  insights: Insight[];
-  lastScreenUpdate: number;
-  isVoiceActive: boolean;
+export interface ReinforcementPolicy {
+  successfulPatterns: string[];
+  lastUpdate: number;
 }

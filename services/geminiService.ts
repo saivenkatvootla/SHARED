@@ -1,137 +1,127 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
 
-// Use process.env.API_KEY directly as per SDK guidelines.
 export const getGeminiClient = () => {
   return new GoogleGenAI({ apiKey: process.env.API_KEY });
 };
 
 /**
- * Analyzes a screenshot to extract and answer questions, considering job role and context file.
+ * HIGH-SPEED SCREEN ANALYSIS
+ * Extracts keywords and matches against RAG context.
  */
 export async function analyzeScreenContent(
   base64Image: string, 
-  modeInstruction: string,
-  contextFileContent: string
-): Promise<{ question: string; answer: string } | null> {
+  modeGuidelines: string,
+  modeFileContent: string,
+  policyMemory: string[]
+): Promise<{ question: string; answer: string; policyApplied: string } | null> {
   const ai = getGeminiClient();
   
   const systemPrompt = `
-    System Instruction: ${modeInstruction}
+    TASK: FAST Technical Extraction.
+    LANGUAGE: Strictly English.
     
-    Additional Context / Knowledge Base:
-    ${contextFileContent ? `(Use the following file content to ground your answers)\n${contextFileContent.slice(0, 30000)}` : 'No additional context provided.'}
+    1. EXTRACT KEYWORDS from the image.
+    2. CONSULT RAG CONTEXT: ${modeFileContent.slice(0, 15000)}
+    3. APPLY USER GUIDELINES: ${modeGuidelines}
+    4. APPLY MEMORY: ${policyMemory.slice(-5).join(' | ')}
     
-    Task:
-    Extract any question or problem visible in this image. 
-    Provide a clear, concise answer. 
-    Tailor the answer to the instruction and context provided above.
-    Return in JSON format.
+    If the image contains a technical question, provide the answer from the context immediately.
+    Be extremely concise. Use technical terminology.
     
-    IMPORTANT: ALL RESPONSES MUST BE IN ENGLISH.
+    Response MUST be JSON.
   `;
 
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
-      contents: {
+      contents: { 
         parts: [
           { inlineData: { mimeType: 'image/jpeg', data: base64Image } },
           { text: systemPrompt }
-        ]
+        ] 
       },
       config: {
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
           properties: {
-            question: { type: Type.STRING },
-            answer: { type: Type.STRING }
+            question: { type: Type.STRING, description: "The keywords/question found" },
+            answer: { type: Type.STRING, description: "The fast technical answer" },
+            policyApplied: { type: Type.STRING, description: "Specific project or guideline used" }
           },
-          required: ["question", "answer"],
-          propertyOrdering: ["question", "answer"]
+          required: ["question", "answer", "policyApplied"]
         }
       }
     });
 
-    const text = response.text;
-    if (!text) return null;
-    return JSON.parse(text);
+    return JSON.parse(response.text || '{}');
   } catch (error) {
-    console.error("Screen analysis error:", error);
+    console.error("Screen Agent Error:", error);
     return null;
   }
 }
 
 /**
- * Processes a typed question using conversational history and mode context.
+ * FAST TEXT QUERY
  */
 export async function processTypedQuestion(
   question: string,
   history: string[],
-  modeInstruction: string,
-  contextFileContent: string
-): Promise<string | null> {
+  modeGuidelines: string,
+  modeFileContent: string,
+  policyMemory: string[]
+): Promise<{ answer: string; policyApplied: string } | null> {
   const ai = getGeminiClient();
-  const contextHistory = history.slice(-5).join('\n'); // Last few conversation snippets
+  const contextHistory = history.slice(-3).join('\n');
 
   const prompt = `
-    Mode: ${modeInstruction}
+    Strictly English. Fast Answer Mode.
+    GUIDELINES: ${modeGuidelines}
+    RAG: ${modeFileContent.slice(0, 8000)}
+    QUERY: ${question}
+    HISTORY: ${contextHistory}
     
-    Converastion History:
-    ${contextHistory || 'None'}
-    
-    Knowledge Base:
-    ${contextFileContent ? contextFileContent.slice(0, 10000) : 'None'}
-    
-    User Query: ${question}
-    
-    Task: Answer the query concisely based on the history and knowledge base provided. 
-    Focus on being direct and extremely helpful.
-    
-    IMPORTANT: ANSWER EXCLUSIVELY IN ENGLISH.
+    Extract keywords and answer from RAG. Respond in JSON.
   `;
 
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
-      contents: prompt
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            answer: { type: Type.STRING },
+            policyApplied: { type: Type.STRING }
+          },
+          required: ["answer", "policyApplied"]
+        }
+      }
     });
-    return response.text || "I'm unable to answer that at the moment.";
+    return JSON.parse(response.text || '{}');
   } catch (error) {
-    console.error("Text query error:", error);
     return null;
   }
 }
 
-/**
- * Encodes audio bytes for Gemini Live API.
- */
 export function encodeAudio(bytes: Uint8Array): string {
   let binary = '';
   const len = bytes.byteLength;
-  for (let i = 0; i < len; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
+  for (let i = 0; i < len; i++) binary += String.fromCharCode(bytes[i]);
   return btoa(binary);
 }
 
-/**
- * Decodes base64 audio for browser AudioContext.
- */
 export function decodeAudio(base64: string): Uint8Array {
   const binaryString = atob(base64);
   const len = binaryString.length;
   const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
-  }
+  for (let i = 0; i < len; i++) bytes[i] = binaryString.charCodeAt(i);
   return bytes;
 }
 
-/**
- * Decodes raw PCM audio data for browser AudioContext.
- */
 export async function decodeAudioData(
   data: Uint8Array,
   ctx: AudioContext,
@@ -141,12 +131,9 @@ export async function decodeAudioData(
   const dataInt16 = new Int16Array(data.buffer);
   const frameCount = dataInt16.length / numChannels;
   const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
-
   for (let channel = 0; channel < numChannels; channel++) {
     const channelData = buffer.getChannelData(channel);
-    for (let i = 0; i < frameCount; i++) {
-      channelData[i] = dataInt16[i * numChannels + channel] / 32768.0;
-    }
+    for (let i = 0; i < frameCount; i++) channelData[i] = dataInt16[i * numChannels + channel] / 32768.0;
   }
   return buffer;
 }

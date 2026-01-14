@@ -1,8 +1,9 @@
 {
   "requestFramePermissions": [
     "camera",
-    "microphone"
+    "microphone",
+    "display-capture"
   ],
-  "name": "",
-  "description": ""
+  "name": "OmniSense AI Assistant",
+  "description": "Fast RAG-enabled AI assistant with screen and voice monitoring."
 }
